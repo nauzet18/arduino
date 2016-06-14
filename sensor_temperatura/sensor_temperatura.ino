@@ -1,7 +1,44 @@
+#include "DHT.h"
+#define DHTPIN 8
+#define DHTTYPE DHT22   // DHT 22  (AM2302)
+// Initialize DHT sensor for normal 16mhz Arduino
+DHT dht(DHTPIN, DHTTYPE);
+
+
+#include <SD.h>
+const int chipSelect = 53;
+void setupSD()
+{
+  pinMode(53, OUTPUT);
+  // see if the card is present and can be initialized:
+  if (!SD.begin(chipSelect)) 
+  {
+    Serial.print("SD begin: ERROR");
+    return;
+  }
+}
+
+void writeDatas( String data )
+{
+  File dataFile = SD.open("datalog.txt", FILE_WRITE);
+  if (dataFile) 
+  {
+    Serial.print("SD escribir:");
+    Serial.println( data );
+    
+    dataFile.println(data);
+    dataFile.close();
+  }
+  else
+  {
+    Serial.println("No se escribio dato en la SD");
+  }
+}
+
 #include <EEPROM.h>
 int Tc_100 = 0;
 int count = 0;
-
+boolean bAlternarDisplay = true;
 
 int DHpin = 8; //humedad
 byte dat [5]; //datos de humedad
@@ -9,7 +46,7 @@ byte dat [5]; //datos de humedad
 int digit1 = 22; //PWM Display pin 1
 int digit2 = 24; //PWM Display pin 2
 int digit3 = 26; //PWM Display pin 6
-int digit4 = 53;//28; //53 1º //PWM Display pin 8
+int digit4 = 28; //28; //53 1º //PWM Display pin 8
 
 //Pin mapping from Arduino to the ATmega DIP28 if you need it
 //http://www.arduino.cc/en/Hacking/PinMapping
@@ -20,15 +57,6 @@ int segD = 39;//pin 2  LCD; //Display pin 3
 int segE = 37;//pin 1  LCD; //Display pin 5
 int segF = 33;//pin 10 LCD; //Display pin 11
 int segG = 45;//pin 5  LCD; //Display pin 15
-
-
-
-//Sensor de temperatura
-#include <OneWire.h>
-
-
-// DS18S20 Temperature chip i/o
-OneWire ds(10);  // on pin 10
 
 void setup(void) {
   // initialize inputs/outputs
@@ -51,138 +79,72 @@ void setup(void) {
   pinMode(digit3, OUTPUT);
   pinMode(digit4, OUTPUT);
 
+  //Configuración de la SD
+  setupSD();
+  //Configuracion de DHT22
+  dht.begin();
 }
+
+float fHumedad =0.0;
+float fTemperatura =0.0;
 
 void loop(void) {
 
   //For conversion of raw data to C
   int HighByte, LowByte, TReading, SignBit, Whole, Fract;
-
   byte i;
   byte present = 0;
   byte data[12];
-  byte addr[8];
-
-if ( count > 100 )
+  byte addr[8];  
+if ( count > 200 )
 {
   count = 0;
  
-  if ( !ds.search(addr)) {
-    Serial.print("No more addresses.\n");
-    ds.reset_search();
-    return;
-  }
-
-  Serial.print("R=");
-  for( i = 0; i < 8; i++) {
-    Serial.print(addr[i], HEX);
-    Serial.print(" ");
-  }
-
-  if ( OneWire::crc8( addr, 7) != addr[7]) {
-    Serial.print("CRC is not valid!\n");
-    return;
-  }
-
-  if ( addr[0] == 0x10) {
-    Serial.print("Device is a DS18S20 family device.\n");
-  }
-  else if ( addr[0] == 0x28) {
-    Serial.print("Device is a DS18B20 family device.\n");
-  }
-  else {
-    Serial.print("Device family is not recognized: 0x");
-    Serial.println(addr[0],HEX);
-    return;
-  }
-
-  ds.reset();
-  ds.select(addr);
-  ds.write(0x44,1);         // start conversion, with parasite power on at the end
-
-//  delay(1000);     // maybe 750ms is enough, maybe not
-
-delay(100);
-  // we might do a ds.depower() here, but the reset will take care of it.
-
-  present = ds.reset();
-  ds.select(addr);    
-  ds.write(0xBE);         // Read Scratchpad
-
-  Serial.print("P=");
-  Serial.print(present,HEX);
-  Serial.print(" ");
-  for ( i = 0; i < 9; i++) {           // we need 9 bytes
-    data[i] = ds.read();
-    Serial.print(data[i], HEX);
-    Serial.print(" ");
-  }
-  Serial.print(" CRC=");
-  Serial.print( OneWire::crc8( data, 8), HEX);
-  Serial.println();
-
-  //Conversion of raw data to C
-  LowByte = data[0];
-  HighByte = data[1];
-  TReading = (HighByte << 8) + LowByte;
-  SignBit = TReading & 0x8000;  // test most sig bit
-  if (SignBit) // negative
-  {
-    TReading = (TReading ^ 0xffff) + 1; // 2's comp
-  }
-  Tc_100 = (6 * TReading) + TReading / 4;    // multiply by (100 * 0.0625) or 6.25
-
-  Whole = Tc_100 / 100;  // separate off the whole and fractional portions
-  Fract = Tc_100 % 100;
-
-  Serial.print("TC-");
-  Serial.print( Tc_100 );
-  Serial.print("\n");    
-
-  if (SignBit) // If its negative
-  {
-    Serial.print("-");
-  }
-  Serial.print(Whole);
-  Serial.print(".");
-  if (Fract < 10)
-  {
-    Serial.print("0");
-  }
-  Serial.print(Fract);
-
-  Serial.print("\n");
-  //End conversion to C
-
-  displayNumber( Tc_100 );  
+  //-------- humedad y temperatura DHT22
+  // Reading temperature or humidity takes about 250 milliseconds!
+  // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
+  fHumedad = dht.readHumidity();
+  // Read temperature as Celsius
+  fTemperatura = dht.readTemperature();
   
-  //--------humedad
-  start_test ();
-  Serial.print ("Current humdity =");
-  Serial.print (dat [0], DEC); // display the humidity-bit integer;
-  Serial.print ('.');
-  Serial.print (dat [1], DEC); // display the humidity decimal places;
-  Serial.println ('%');
-  Serial.print ("Current temperature =");
-  Serial.print (dat [2], DEC); // display the temperature of integer bits;
-  Serial.print ('.');
-  Serial.print (dat [3], DEC); // display the temperature of decimal places;
-  Serial.println ('C');
+  // Check if any reads failed and exit early (to try again).
+  if (isnan(fHumedad) || isnan(fTemperatura ) ) {
+    Serial.println("Failed to read from DHT sensor!");
+    return;
+  }
 
-  
+   Serial.println( "fHumedad:" );
+   Serial.println( fHumedad );
+   
+   Serial.println( "fTemperatura :" );
+   Serial.println( fTemperatura );
   //------- Fin humedad
+  //Escrimos los datos de temperatura y de humedad en la SD
+  String data = "";
+  data = "T:"+(String)fTemperatura +"|HT:"+(String)fHumedad;
   
+  writeDatas( data );
   
+  //Cada vez que sacamos los datos, señalizamos para alternar el dato a mostrar por el displey  
+  bAlternarDisplay = !bAlternarDisplay;
 }
 else
 {
   count= count+1;
-
-  Serial.print("TC S-");
-  Serial.print( Tc_100 );
-  Serial.print("\n");    
   
- displayNumber( Tc_100 );  
+//Alterno entre la impresión de la temperatura y la humedad  
+  if ( bAlternarDisplay )
+  {
+    int iTemperaturaPrint = fTemperatura*100 ;
+    displayNumber( iTemperaturaPrint );
+  }
+  else
+  {
+    int iHumedadPrint = fHumedad*100 ;
+    displayNumber( iHumedadPrint );  
+  }
+
+  
 }
   
 }
@@ -377,38 +339,3 @@ void lightNumber(int numberToDisplay) {
   }
 }
 
-
-//KY015 DHT11 Temperature and humidity sensor 
-byte read_data () {
-  byte data;
-  for (int i = 0; i < 8; i ++) {
-    if (digitalRead (DHpin) == LOW) {
-      while (digitalRead (DHpin) == LOW); // wait for 50us
-      delayMicroseconds (30); // determine the duration of the high level to determine the data is '0 'or '1'
-      if (digitalRead (DHpin) == HIGH)
-        data |= (1 << (7-i)); // high front and low in the post
-      while (digitalRead (DHpin) == HIGH); // data '1 ', wait for the next one receiver
-     }
-  }
-return data;
-}
- 
-void start_test () {
-  digitalWrite (DHpin, LOW); // bus down, send start signal
-  delay (30); // delay greater than 18ms, so DHT11 start signal can be detected
- 
-  digitalWrite (DHpin, HIGH);
-  delayMicroseconds (40); // Wait for DHT11 response
- 
-  pinMode (DHpin, INPUT);
-  while (digitalRead (DHpin) == HIGH);
-  delayMicroseconds (80); // DHT11 response, pulled the bus 80us
-  if (digitalRead (DHpin) == LOW);
-  delayMicroseconds (80); // DHT11 80us after the bus pulled to start sending data
- 
-  for (int i = 0; i < 4; i ++) // receive temperature and humidity data, the parity bit is not considered
-    dat[i] = read_data ();
- 
-  pinMode (DHpin, OUTPUT);
-  digitalWrite (DHpin, HIGH); // send data once after releasing the bus, wait for the host to open the next Start signal
-}
